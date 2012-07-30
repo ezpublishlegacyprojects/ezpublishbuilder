@@ -1,19 +1,18 @@
 <?php
 /**
-* eZPublishBuilder pakefile:
-* a script to build & package the eZ Publish Community Project.
-*
-* Needs the Pake tool to run: https://github.com/indeyets/pake/wiki
-* It can bootstrap, by downloading all required components from the web
-*
-* The steps involved in the build process are described here:
-* https://docs.google.com/a/ez.no/document/d/1h5n3aZdXbyo9_iJoDjoDs9a6GdFZ2G-db9ToK7J1Gck/edit?hl=en_GB
-*
-* @author    G. Giunta
-* @copyright (C) G. Giunta 2011-2012
-* @license   code licensed under the GNU GPL 2.0: see README file
-* @version   $Id$
-*/
+ * eZPublishBuilder pakefile:
+ * a script to build & package the eZ Publish Community Project.
+ *
+ * Needs the Pake tool to run: https://github.com/indeyets/pake/wiki
+ * It can bootstrap, by downloading all required components from the web
+ *
+ * The steps involved in the build process are described here:
+ * https://docs.google.com/a/ez.no/document/d/1h5n3aZdXbyo9_iJoDjoDs9a6GdFZ2G-db9ToK7J1Gck/edit?hl=en_GB
+ *
+ * @author    G. Giunta
+ * @copyright (C) G. Giunta 2011-2012
+ * @license   code licensed under the GNU GPL 2.0: see README file
+ */
 
 // too smart for your own good: allow this script to be gotten off web servers in source form
 if ( isset( $_GET['show'] ) && $_GET['show'] == 'source' )
@@ -51,11 +50,17 @@ if ( !function_exists( 'run_default' ) )
 
 // definition of the pake tasks
 
+/**
+ * Shows help message
+ */
 function run_default()
 {
-    pake_echo ( "eZ Publish Community Project Builder ver." . eZPCPBuilder::$version . "\nSyntax: php pakefile.php [--\$general-options] \$task [--\$task-options].\n  Run: php pakefile.php --tasks to learn more about available tasks." );
+    pake_echo ( "eZ Publish Community Project Builder ver." . eZPCPBuilder::$version . "\nSyntax: php pakefile.php [--\$general-options] \$task [--\$task-options].\n  Run: \"php pakefile.php --tasks\" to learn more about available tasks or \"php pakefile.php help\" for more information." );
 }
 
+/**
+ * Shows the properties for this build file
+ */
 function run_show_properties( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
@@ -63,9 +68,9 @@ function run_show_properties( $task=null, $args=array(), $cliopts=array() )
 }
 
 /**
-* Downloads eZP from its source repository, ...
-* @todo add a dependency on a check-updates task that updates script itself?
-*/
+ * Downloads eZP from its source repository on github (needs to be run only once)
+ * @todo add a dependency on a check-updates task that updates script itself?
+ */
 function run_init( $task=null, $args=array(), $cliopts=array() )
 {
     $skip_init = @$cliopts['skip-init'];
@@ -88,7 +93,15 @@ function run_init( $task=null, $args=array(), $cliopts=array() )
             throw new pakeException( "Missing source repo option git:url in config file" );
         }
 
-        /// @todo test what happens if target dir is not empty?
+        // if target dir is not empty, force user to run a "clean"
+        if ( is_dir( $destdir ) )
+        {
+            $leftovers = pakeFinder::type( 'any' )->maxdepth( 1 )->in( $destdir );
+            if ( count( $leftovers ) )
+            {
+                throw new pakeException( "Can not download eZ sources into directory $destdir because it is not empty. Please run task 'clean' to wipe it then retry" );
+            }
+        }
 
         /// @todo to make successive builds faster - if repo exists already just
         ///       update it
@@ -103,11 +116,18 @@ function run_init( $task=null, $args=array(), $cliopts=array() )
 }
 
 /**
- * Downloads the CI repo from its source repository
+ * Downloads the CI repo sources from github (needs to be run only once)
  */
 function run_init_ci_repo( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
+
+    $skip_init = @$cliopts['skip-init'];
+    if ( $skip-init )
+    {
+        return;
+    }
+
     if ( @$opts['ci-repo']['local-path'] == '' )
     {
         throw new pakeException( "Missing option ci-repo:local-path in config file: can not download CI repo" );
@@ -116,9 +136,20 @@ function run_init_ci_repo( $task=null, $args=array(), $cliopts=array() )
 
     pake_echo( 'Fetching sources from CI git repository' );
 
-    /// @todo test what happens if target dir is not empty?
+    // if target dir is not empty, force user to run a "clean"
+    if ( is_dir( $destdir ) )
+    {
+        $leftovers = pakeFinder::type( 'any' )->maxdepth( 1 )->in( $destdir );
+        if ( count( $leftovers ) )
+        {
+            throw new pakeException( "Can not download CI repo into directory $destdir because it is not empty. Please run task clean-ci-repo to wipe it then retry" );
+        }
+    }
 
+    /// @todo to make successive builds faster - if repo exists already just
+    ///       update it
     $repo = pakeGit::clone_repository( $opts['ci-repo']['git-url'], $destdir );
+
     // q: is this really needed?
     if ( $opts['ci-repo']['git-branch'] != '' )
     {
@@ -126,6 +157,7 @@ function run_init_ci_repo( $task=null, $args=array(), $cliopts=array() )
     }
 
     /// @todo set up username and password in $opts['ci-repo']['git-branch']/.git/config
+    ///       from either config file or interactive mode
 
     pake_echo( "The CI git repo has been set up in $destdir\n" .
         "You should now set up properly your git user account and make sure it has\n".
@@ -133,18 +165,65 @@ function run_init_ci_repo( $task=null, $args=array(), $cliopts=array() )
 }
 
 /**
-* We rely on the pake dependency system to do the real stuff
-* (run pake -P to see tasks included in this one)
-*/
+ * Builds the cms; options: --skip-init, --skip-changelog-pause, --skip-before-jenkins-pause.
+ *
+ * We rely on the pake dependency system to do the real stuff
+ * (run pake -P to see tasks included in this one)
+ */
 function run_build( $task=null, $args=array(), $cliopts=array() )
 {
 }
 
 /**
-* Generates a changelog file based on git commit logs.
-* The generated file is placed in the correct folder within doc/changelogs.
-* It should be reviewed/edited by hand, then committed with the task "update-ci-repo".
-*/
+ * Updates local eZP sources (git pull from github)
+ */
+function run_update_source( $task=null, $args=array(), $cliopts=array() )
+{
+    $opts = eZPCPBuilder::getOpts( $args );
+    $rootpath = $opts['build']['dir'] . '/source/' . eZPCPBuilder::getProjName();
+
+    $git = escapeshellarg( pake_which( 'git' ) );
+
+    // 1. check if build dir is correctly linked to source git repo
+    /// @todo use pakeGit::remotes() instead of this code
+    $remotesArray = preg_split( '/(\r\n|\n\r|\r|\n)/', pake_sh( 'cd ' . escapeshellarg( $rootpath ) . " && $git remote -v" ) );
+    $originf = false;
+    foreach( $remotesArray as $remote )
+    {
+        if ( strpos( $remote, $opts['git']['url'] . ' (fetch)' ) !== false )
+        {
+            $originf = explode( ' ', $remote );
+            $originf = $originf[0];
+        }
+    }
+    if ( !$originf )
+    {
+        throw new pakeException( "Build dir $rootpath does not seem to be linked to git repo {$opts['git']['url']}" );
+    }
+
+    // 2. pull and move to correct branch
+    $repo = new pakeGit( $rootpath );
+
+    /// @todo test that the branch switch does not fail
+    if ( @$opts['git']['branch'] != '' )
+    {
+        $repo->checkout( $opts['git']['branch'] );
+    }
+    else
+    {
+        $repo->checkout( 'master' );
+    }
+
+    /// @todo test that the pull does not fail
+    $repo->pull();
+}
+
+/**
+ * Generates a changelog file based on git commit logs.
+ *
+ * The generated file is placed in the correct folder within doc/changelogs.
+ * It should be reviewed/edited by hand, then committed with the task "update-ci-repo".
+ */
 function run_generate_changelog( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
@@ -211,25 +290,29 @@ function run_generate_changelog( $task=null, $args=array(), $cliopts=array() )
 
     if ( $previousrev != '' )
     {
+        /* moved all of this in a separate task function
+
         pake_echo( "Updating eZ Publish sources from git" );
 
         /// @todo move all of this in a specific function to be reused
 
+            $git = escapeshellarg( pake_which( 'git' ) );
+
             // 1. check if build dir is correctly linked to source git repo
-            /// @todo test for git errors
-            exec( 'cd ' . escapeshellarg( $rootpath ) . " && git remote -v", $remotesArray, $ok );
-            $found = false;
+            /// @todo use pakeGit::remotes() instead of this code
+            $remotesArray = preg_split( '/(\r\n|\n\r|\r|\n)/', pake_sh( 'cd ' . escapeshellarg( $rootpath ) . " && $git remote -v" ) );
+            $originf = false;
             foreach( $remotesArray as $remote )
             {
                 if ( strpos( $remote, $opts['git']['url'] . ' (fetch)' ) !== false )
                 {
-                    // q: should we check that remote is called 'origin'? since we later call 'pull' without params...
-                    $found = true;
+                    $originf = explode( ' ', $remote );
+                    $originf = $originf[0];
                 }
             }
-            if ( !$found )
+            if ( !$originf )
             {
-                throw new pakeException( "Build dir $rootpath does nto seem to be linked to git repo {$opts['git']['url']}" );
+                throw new pakeException( "Build dir $rootpath does not seem to be linked to git repo {$opts['git']['url']}" );
             }
 
             // 2. pull and move to correct branch
@@ -247,15 +330,21 @@ function run_generate_changelog( $task=null, $args=array(), $cliopts=array() )
 
             /// @todo test that the pull does not fail
             $repo->pull();
+        */
 
-        /// @todo check if given revision exists in git repo? We'll get an empty changelof if it does not...
+        /// @todo check if given revision exists in git repo? We'll get an empty changelog if it does not...
 
-        // pake's own git class does not allow usage of 'git log' yet
-        /// @todo test for git errors
-        exec( 'cd ' . escapeshellarg( $rootpath ) . " && git log --pretty=%s " . escapeshellarg( $previousrev ) . "..HEAD", $changelogArray, $ok );
+        /// @todo replace with pakegit::log
+        $git = escapeshellarg( pake_which( 'git' ) );
+        $changelogArray = preg_split( '/(\r\n|\n\r|\r|\n)/', pake_sh( 'cd ' . escapeshellarg( $rootpath ) . " && $git log --pretty=%s " . escapeshellarg( $previousrev ) . "..HEAD" ) );
 
         $changelogArray = array_map( 'trim', $changelogArray );
         $changelogText = implode( "\n", $changelogArray );
+
+        if ( $changelogText == '' )
+        {
+            pake_echo( "Git log returns an empty string - generating an empty changelog file. Please check if there is any problem with $rootpath" );
+        }
 
         // extract known wit issues
         preg_match_all( "/^[- ]?Fix(?:ed|ing)?(?: bug|for ticket)? #0?([0-9]+):? (.*)$/mi", $changelogText, $bugfixesMatches, PREG_PATTERN_ORDER );
@@ -323,7 +412,9 @@ function run_wait_for_changelog( $task=null, $args=array(), $cliopts=array() )
     }
 }
 
-/// @todo
+/**
+ * Generate changelog files that can be copied and pasted into ezxml rich text; NOT FINISHED YET
+ */
 function run_generate_html_changelog( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
@@ -332,63 +423,154 @@ function run_generate_html_changelog( $task=null, $args=array(), $cliopts=array(
     $filename = eZPCPBuilder::changelogFilename( $opts );
 
     $file = pake_read_file( $changelogdir . '/' . $filename );
+    $htmlfile = array();
+    $mode = null;
+    foreach( explode( "\n", $file ) as $line )
+    {
+        switch( $line )
+        {
+            case "Bugfixes":
+                $mode = 'wit';
+                $htmlfile[] = '<h3>' . $line . "</h3>\n<ul>";
+                break;
+            case "Enhancements":
+                $mode = 'wit';
+                $htmlfile[] = "</ul>\n<h3>" . $line . "</h3>\n<ul>";
+                break;
+            case "Pull requests":
+                $mode = 'github';
+                $htmlfile[] = "</ul>\n<h3>" . $line . "</h3>\n<ul>";
+                break;
+            case "Miscellaneous":
+                $mode = null;
+                $htmlfile[] = "</ul>\n<h3>" . $line . "</h3>\n<ul>";
+                break;
+            default:
+                if ( trim( $line ) == '' || preg_match( '/^=+$/', $line ) )
+                {
+                    continue;
+                }
+                switch( $mode )
+                {
+                    case 'wit':
+                        $line = preg_replace( '/^- /', '', $line );
+                        $line = preg_replace( '/#(\d+):/', '<a href="http://issues.ez.no/$1">$1</a>:', htmlspecialchars( $line ) );
+                        break;
+                    case 'github':
+                        $line = preg_replace( '/^- /', '', $line );
+                        $line = preg_replace( '/#(\d+):/', '<a href="https://github.com/ezsystems/ezpublish/pull/$1">$1</a>:', htmlspecialchars( $line)  );
+                        break;
+                    default;
+                        $line = preg_replace( '/^- /', '', htmlspecialchars( $line ) );
+                        break;
 
-    pake_echo( 'TO DO: build html version of changelog' );
+                }
+                $htmlfile[] = '<li>' . $line . '</li>';
+        }
+    }
+    $htmlfile[] = '</ul>';
+    $htmlfile = implode( "\n", $htmlfile );
+
+    pake_echo( $htmlfile );
 }
 
 /**
-* This tasks updates files in the "ci" git repository.
-* The "ci" repo is used by the standard eZ Publish build process, driven by Jenkins.
-* It holds, amongs other things, patch files that are applied in order to build the
-* CP version instead of the Enterprise one
-*/
-function run_update_ci_repo( $task=null, $args=array(), $cliopts=array() )
+ * Generate changelog files that can be copied and pasted into ezxml rich text; NOT FINISHED YET
+ */
+function run_generate_html_credits( $task=null, $args=array(), $cliopts=array() )
+{
+    $opts = eZPCPBuilder::getOpts( $args );
+    $rootpath = $opts['build']['dir'] . '/source/' . eZPCPBuilder::getProjName();
+    $changelogdir = $rootpath . '/doc/changelogs/Community_Project-' . $opts['version']['major'];
+    $filename = eZPCPBuilder::changelogFilename( $opts );
+
+    $file = pake_read_file( $changelogdir . '/' . $filename );
+    $htmlfile = array( '<h3>Many thanks for your pull-requests on the eZ Publish repository, and on extensions :</h3>', '<ul>' );
+    $mode = null;
+    foreach( explode( "\n", $file ) as $line )
+    {
+        switch( $line )
+        {
+            case "Bugfixes":
+            case "Enhancements":
+                $mode = 'wit';
+                break;
+            case "Pull requests":
+                $mode = 'github';
+                break;
+            case "Miscellaneous":
+                $mode = null;
+                break;
+            default:
+                if ( trim( $line ) == '' || preg_match( '/^=+$/', $line ) )
+                {
+                    continue;
+                }
+                switch( $mode )
+                {
+                    case 'github':
+                        if ( preg_match( '#from (.+)/#', $line, $matches ) )
+                        {
+                            /// @todo add link
+                            $htmlfile[] = '<li><a href="https://github.com/' . urlencode( $matches[1] ) . '/">' . htmlspecialchars( $matches[1] ) . '</a></li>';
+                        }
+                        break;
+                    default;
+                        break;
+
+                }
+        }
+    }
+    $htmlfile[] = '</ul>';
+    $htmlfile = implode( "\n", $htmlfile );
+
+    pake_echo( $htmlfile );
+}
+
+/**
+ * Updates the local copy of the CI repo (pull from github)
+ */
+function run_update_ci_repo_source( $task=null, $args=array(), $cliopts=array() )
 {
     // needed on windows - unless a recent git version is used (1.7.9 is ok)
-    // and a patched pakeGit class is used ( > pake 1.6.3)
-    pakeGit::$needs_work_tree_workaround = true;
+    // and a recent pakeGit class is used ( > pake 1.6.3)
+    // pakeGit::$needs_work_tree_workaround = true;
 
     $opts = eZPCPBuilder::getOpts( $args );
     $rootpath = $opts['build']['dir'] . '/source/' . eZPCPBuilder::getProjName();
 
-    // 0. generate changelog diff
-    $changelogdir = 'doc/changelogs/Community_Project-' . $opts['version']['major'];
-    // get absolute path to build dir
-    $absrootpath = pakeFinder::type( 'directory' )->name( eZPCPBuilder::getProjName() )->in( $opts['build']['dir'] . '/source' );
-    $absrootpath = dirname( $absrootpath[0] );
-    $difffile = $absrootpath . '/' . $opts['version']['alias'] . '_patch_fix_changelog.diff';
-
-    /// @todo test for errors
-    exec( 'cd ' . escapeshellarg( $rootpath ) . ' && git add ' . escapeshellarg( $changelogdir ), $out, $return );
-
-    /// @todo test for errors
-    exec( 'cd ' . escapeshellarg( $rootpath ) . ' && git diff --no-prefix --staged -- ' . escapeshellarg( $changelogdir ) . " > " . escapeshellarg( $difffile ), $out, $return );
-
-    /// unstage the file
-    /// @todo test for errors
-    exec( 'cd ' . escapeshellarg( $rootpath ) . ' && git reset HEAD --' );
-
     // start work on the ci repo:
 
     // 1. update ci repo
+
+    /// @todo move this whole "update" part to a separate function for better reuse
     $cipath = $opts['ci-repo']['local-path'];
 
+    $git = escapeshellarg( pake_which( 'git' ) );
+
     // test that we're on the good git
-    exec( 'cd ' . escapeshellarg( $cipath ) . " && git remote -v", $remotesArray, $ok );
-    $found = false;
+    /// @todo use pakeGit::remotes() instead of this code
+    $remotesArray = preg_split( '/(\r\n|\n\r|\r|\n)/', pake_sh( 'cd ' . escapeshellarg( $cipath ) . " && $git remote -v" ) );
+    $originp = false;
+    $originf = false;
+
     foreach( $remotesArray as $remote )
     {
+        if ( strpos( $remote, $opts['ci-repo']['git-url'] . ' (push)' ) !== false )
+        {
+            $originp = preg_split( '/[ \t]/', $remote );
+            $originp = $originp[0];
+        }
         if ( strpos( $remote, $opts['ci-repo']['git-url'] . ' (fetch)' ) !== false )
         {
-            // q: should we check that remote is called 'origin'? since we later call 'pull' without params...
-            $found = true;
+            $originf = preg_split( '/[ \t]/', $remote );
+            $originf = $originf[0];
         }
     }
-    if ( !$found )
+    if ( !$originp || !$originf )
     {
-        throw new pakeException( "Build dir $cipath does nto seem to be linked to git repo {$opts['ci-repo']['git-url']}" );
+        throw new pakeException( "CI repo dir $cipath does not seem to be linked to git repo {$opts['ci-repo']['git-url']}" );
     }
-
     $repo = new pakeGit( $cipath );
 
     if ( $opts['ci-repo']['git-branch'] != '' )
@@ -399,31 +581,210 @@ function run_update_ci_repo( $task=null, $args=array(), $cliopts=array() )
 
     /// @todo test that the pull does not fail
     $repo->pull();
+}
+
+/**
+ * Commits changelog to the "ci" git repo and updates in there other files holding version-related infos.
+ * As part of this task, the local copy of the "ci" git repo is updated from upstream.
+ *
+ * The "ci" repo is used by the standard eZ Publish build process, driven by Jenkins.
+ * It holds, amongs other things, patch files that are applied in order to build the
+ * CP version instead of the Enterprise one
+ */
+function run_update_ci_repo( $task=null, $args=array(), $cliopts=array() )
+{
+    // needed on windows - unless a recent git version is used (1.7.9 is ok)
+    // and a recent pakeGit class is used ( > pake 1.6.3)
+    // pakeGit::$needs_work_tree_workaround = true;
+
+    $opts = eZPCPBuilder::getOpts( $args );
+    $rootpath = $opts['build']['dir'] . '/source/' . eZPCPBuilder::getProjName();
+
+    // start work on the ci repo:
+
+    $cipath = $opts['ci-repo']['local-path'];
+    $git = escapeshellarg( pake_which( 'git' ) );
+
+    /* 1. update ci repo - moved to a separate task
+
+    // test that we're on the good git
+    /// @todo use pakeGit::remotes() instead of this code
+    $remotesArray = preg_split( '/(\r\n|\n\r|\r|\n)/', pake_sh( 'cd ' . escapeshellarg( $cipath ) . " && $git remote -v" ) );
+    $originp = false;
+    $originf = false;
+
+    foreach( $remotesArray as $remote )
+    {
+        if ( strpos( $remote, $opts['ci-repo']['git-url'] . ' (push)' ) !== false )
+        {
+            $originp = preg_split( '/[ \t]/', $remote );
+            $originp = $originp[0];
+        }
+        if ( strpos( $remote, $opts['ci-repo']['git-url'] . ' (fetch)' ) !== false )
+        {
+            $originf = preg_split( '/[ \t]/', $remote );
+            $originf = $originf[0];
+        }
+    }
+    if ( !$originp || !$originf )
+    {
+        throw new pakeException( "CI repo dir $cipath does not seem to be linked to git repo {$opts['ci-repo']['git-url']}" );
+    }
+    $repo = new pakeGit( $cipath );
+
+    if ( $opts['ci-repo']['git-branch'] != '' )
+    {
+        /// @todo test that the branch switch does not fail
+        $repo->checkout( $opts['ci-repo']['git-branch'] );
+    }
+
+    /// @todo test that the pull does not fail
+    $repo->pull();
+    */
+
+    $repo = new pakeGit( $cipath );
 
     if ( $opts['ci-repo']['git-path'] != '' )
     {
         $cipath .= '/' . $opts['ci-repo']['git-path'];
+        $localcipath = $opts['ci-repo']['git-path'] . '/';
+    }
+    else
+    {
+        $localcipath = '';
+    }
+
+    // 1b. check that there is no spurious stuff in changelog dir, or step 3 later will create bad patch files.
+    //     we do this here to avoid adding ANY file to local copy of CI git repo and abort asap
+    $changelogdir = 'doc/changelogs/Community_Project-' . $opts['version']['major'];
+    $files = pakeFinder::type( 'file' )->maxdepth( 0 )->in( $rootpath . '/' . $changelogdir );
+    if ( count( $files ) != 1 )
+    {
+        throw new pakeException( "More than one changelog file found in directory $changelogdir, can not generate patch file for CI repo" );
     }
 
     // 2. update 0002_2011_11_patch_fix_version.diff file
 
-    /// @todo if a new major version has been released, the '0002_2011_11_patch_fix_version.diff' patch will not apply
-    ///       we need thus to regenerate one (more details: https://docs.google.com/a/ez.no/document/d/1h5n3aZdXbyo9_iJoDjoDs9a6GdFZ2G-db9ToK7J1Gck/edit?hl=en_GB)
+    $files1 = pakeFinder::type( 'file' )->name( '0002_2011_11_patch_fix_version.diff' )->maxdepth( 0 )->in( $cipath . '/patches' );
+    $files2 = pakeFinder::type( 'file' )->name( '0003_2011_11_patch_fix_package_repository.diff' )->maxdepth( 0 )->in( $cipath . '/patches' );
+    /// @todo what if those files are gone?
+    $patchfile1 = $files1[0];
+    $patchfile2 = $files2[0];
 
-    $files = pakeFinder::type( 'file' )->name( '0002_2011_11_patch_fix_version.diff' )->maxdepth( 0 )->in( $cipath . '/patches' );
-    pake_replace_regexp( $files, $cipath . '/patches', array(
+    // if a new major version has been released, the '0002_2011_11_patch_fix_version.diff' patch will not apply,
+    // and the '0003_2011_11_patch_fix_package_repository.diff' file will have to be altered as well
+    // we need thus to regenerate them (more details: https://docs.google.com/a/ez.no/document/d/1h5n3aZdXbyo9_iJoDjoDs9a6GdFZ2G-db9ToK7J1Gck/edit?hl=en_GB)
+
+    // 1st, we test that the current patch file will apply cleanly (if it does, we assume no new EE release)
+    $patch = escapeshellarg( pake_which( 'patch' ) );
+    $patcherror = false;
+    try
+    {
+        $patchResult = pake_sh( 'cd ' . escapeshellarg( $rootpath ) . " && $patch --dry-run -p0 < " . $patchfile1 );
+    }
+    catch( Exception $e )
+    {
+        $patcherror = $e->getMessage();
+    }
+
+    // then, we (try to) recover version info from existing patch files
+    $patch1 = file_get_contents( $patchfile1 );
+    $patch2 = file_get_contents( $patchfile2 );
+    if (
+        preg_match( '/^\- +const +VERSION_MAJOR += +(\d+);/m', $patch1, $m1 ) &&
+        preg_match( '/^\- +const +VERSION_MINOR += +(\d+);/m', $patch1, $m2 ) &&
+        preg_match( '/^\+RemotePackagesIndexURL=http:\/\/packages.ez.no\/ezpublish\/[^\/]+\/(.+)$/m', $patch2, $m3 )
+    )
+    {
+        $oldNextVersionMajor = $m1[1];
+        $oldNextVersionMinor = $m2[1];
+        $currentVersion = $m3[1];
+        // give some information to user
+        pake_echo( "Packages available during setup wizard execution for this CP build will be the ones from eZP $currentVersion" );
+        pake_echo( "The next build of eZ Publish EE is expected to be $oldNextVersionMajor.$oldNextVersionMinor" );
+
+        // last, we try automated fixing or abort
+        if ( $patcherror )
+        {
+            // try to gather enough information to fix automatically the patch files
+            $currfile = file_get_contents( $rootpath . '/lib/version.php' );
+            if (
+                preg_match( '/^\ +const +VERSION_MAJOR += +(\d+);/m', $currfile, $m1 ) &&
+                preg_match( '/^\ +const +VERSION_MINOR += +(\d+);/m', $currfile, $m2 ) )
+            {
+                $newNextVersionMajor = $m1[1];
+                $newNextVersionMinor = $m2[1];
+                if ( $newNextVersionMajor == $oldNextVersionMajor && $newNextVersionMinor == $oldNextVersionMinor )
+                {
+                    // patch does not apply but version number was not changed. Abort
+                    throw new pakeException( "The diff file $patchfile1 does not apply correctly, build will fail. Please fix it, commit and push.\n Also chek to fix if needed the url to packages repo in 0003_2011_11_patch_fix_package_repository.diff.\nError details:\n" . $patcherror );
+                }
+                pake_echo( "It seems that EE version $oldNextVersionMajor.$oldNextVersionMinor was released, next expected EE version is currently $newNextVersionMajor.$newNextVersionMinor" );
+                pake_echo( "The script can fix this automatically, or you will have to fix patch files by hand (at least 2 of them)" );
+                pake_echo( "Proposed changes:" );
+                pake_echo( "Packages available during setup wizard execution for this CP build will be the ones from eZP $oldNextVersionMajor.$oldNextVersionMinor.0" );
+                $ok = pake_input( "Do you want to continue with automatic fixing? [y/n]", 'n' );
+                if ( $ok != 'y' )
+                {
+                    throw new pakeException( "Please fix patch file by hand, commit and push.\nAlso remember to fix the url to packages repo in 0003_2011_11_patch_fix_package_repository.diff" );
+                }
+                else
+                {
+                    pake_replace_regexp( $files1, $cipath . '/patches', array(
+                        '/^- +const +VERSION_MAJOR += +\d+;/m' => "+    const VERSION_MAJOR = $newNextVersionMajor;",
+                        '/^- +const +VERSION_MINOR += +\d+;/m' => "+    const VERSION_MINOR = $newNextVersionMinor;"
+                    ) );
+                    pake_replace_regexp( $files2, $cipath . '/patches', array(
+                        '/^\+RemotePackagesIndexURL=http:\/\/packages.ez.no\/ezpublish\/([^\/]+)\/.*$/m' => "+RemotePackagesIndexURL=http://packages.ez.no/ezpublish/$oldNextVersionMajor.$oldNextVersionMinor/$oldNextVersionMajor.$oldNextVersionMinor.0"
+                    ) );
+                }
+            }
+            else
+            {
+                throw new pakeException( "The diff file $patchfile1 does not apply correctly, build will fail. Please fix it, commit and push.\n Also remember to fix the url to packages repo in 0003_2011_11_patch_fix_package_repository.diff.\nError details:\n" . $patcherror );
+            }
+        }
+
+    }
+    else
+    {
+        if ( $patcherror )
+        {
+            throw new pakeException( "The diff file $patchfile1 does not apply correctly, build will fail. Please fix it, commit and push.\n Also remember to fix the url to packages repo in 0003_2011_11_patch_fix_package_repository.diff.\nError details:\n" . $patcherror );
+        }
+        else
+        {
+            /// @todo waht to do here? warn user and give him a chance to abort...
+        }
+    }
+
+    // finally, the changes which apply every time
+    pake_replace_regexp( $files1, $cipath . '/patches', array(
         '/^\+ +const +VERSION_MAJOR += +\d+;/m' => "+    const VERSION_MAJOR = {$opts['version']['major']};",
         '/^\+ +const +VERSION_MINOR += +\d+;/m' => "+    const VERSION_MINOR = {$opts['version']['minor']};"
     ) );
-    $repo->add( array( 'patches/0002_2011_11_patch_fix_version.diff' ) );
+    $repo->add( array( $localcipath . 'patches/0002_2011_11_patch_fix_version.diff' ) );
 
-    // 3. add new changelog file
+    // 3. generate changelog diff
+
+    // get absolute path to build dir
+    $absrootpath = pakeFinder::type( 'directory' )->name( eZPCPBuilder::getProjName() )->in( $opts['build']['dir'] . '/source' );
+    $absrootpath = dirname( $absrootpath[0] );
+    $difffile = $absrootpath . '/' . $opts['version']['alias'] . '_patch_fix_changelog.diff';
+
+    pake_sh( 'cd ' . escapeshellarg( $rootpath ) . " && $git add " . escapeshellarg( $changelogdir ) );
+
+    pake_sh( 'cd ' . escapeshellarg( $rootpath ) . " && $git diff --no-prefix --staged -- " . escapeshellarg( $changelogdir ) . " > " . escapeshellarg( $difffile ) );
+
+    /// unstage the file
+    pake_sh( 'cd ' . escapeshellarg( $rootpath ) . " && $git reset HEAD --" );
+
+    // 4. add new changelog file
     /// calculate sequence nr.
     $max = 0;
     $files = pakeFinder::type( 'file' )->maxdepth( 0 )->in( $cipath . '/patches' );
     foreach( $files as $file )
     {
-        echo "$file\n";
         $nr = (int)substr( basename( $file ), 0, 4 );
         if ( $nr > $max )
         {
@@ -433,20 +794,21 @@ function run_update_ci_repo( $task=null, $args=array(), $cliopts=array() )
     $seqnr = str_pad( (  $max + 1 ), 4, '0', STR_PAD_LEFT );
     $newdifffile = $seqnr .'_' . str_replace( '.', '_', $opts['version']['alias'] ) . '_patch_fix_changelog.diff';
     pake_copy( $difffile, $cipath . '/patches/' . $newdifffile, array( 'override' => true ) );
-    $repo->add( array( 'patches/' . $newdifffile ) );
+    $repo->add( array( $localcipath . 'patches/' . $newdifffile ) );
 
-    // 4. update ezpublish-gpl.properties
+    // 5. update ezpublish-gpl.properties
     $files = pakeFinder::type( 'file' )->name( 'ezpublish-gpl.properties' )->maxdepth( 0 )->in( $cipath . '/properties' );
     pake_replace_regexp( $files, $cipath . '/properties', array(
         '/^ezp\.cp\.version\.major += +.+$/m' => "ezp.cp.version.major = {$opts['version']['major']}",
         '/^ezp\.cp\.version\.minor += +.+$/m' => "ezp.cp.version.minor = {$opts['version']['minor']}"
     ) );
-    $repo->add( array( 'properties/ezpublish-gpl.properties' ) );
+    $repo->add( array( $localcipath . 'properties/ezpublish-gpl.properties' ) );
+
+exit;
 
     // 5. commit changes and push to upstream
     $repo->commit( 'Prepare files for build of CP ' . $opts['version']['alias'] );
-    /// @todo test for errors
-    exec( 'cd ' . escapeshellarg( $cipath ) . ' && git push', $ouput, $return );
+    pake_sh( 'cd ' . escapeshellarg( $cipath ) . " && $git push $originp {$opts['ci-repo']['git-branch']}:{$opts['ci-repo']['git-branch']}" );
 }
 
 function run_wait_for_continue( $task=null, $args=array(), $cliopts=array() )
@@ -462,6 +824,9 @@ function run_wait_for_continue( $task=null, $args=array(), $cliopts=array() )
     }
 }
 
+/**
+ * Executes the build project on Jenkins
+ */
 function run_run_jenkins_build( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
@@ -477,10 +842,15 @@ function run_run_jenkins_build( $task=null, $args=array(), $cliopts=array() )
     $out = pake_read_file( $buildstarturl );
     // "scrape" the number of the currently executing build, and hope it is the one we triggered.
     // example: <a href="lastBuild/">Last build (#506), 0.32 sec ago</a></li>
-    $ok = preg_match( '/<a href="lastBuild\/">Last build \(#(\d+)\)/', $out, $matches );
+    $ok = preg_match( '/<a [^>].*href="lastBuild\/">Last build \(#(\d+)\)/', $out, $matches );
     if ( !$ok )
     {
-        throw new pakeException( "Build not started or unknown error" );
+        // example 2: <a href="/job/ezpublish-full-community/671/console"><img height="16" alt="In progress &gt; Console Output" width="16" src="/static/b50e0545/images/16x16/red_anime.gif" tooltip="In progress &gt; Console Output" /></a>
+        $ok = preg_match( '/<a href="\/job\/' . $opts['jenkins']['job'] . '\/(\d+)\/console"><img height="16" alt="In progress &gt; Console Output"/', $out, $matches );
+        if ( !$ok )
+        {
+            throw new pakeException( "Build not started or unknown error. Jenkins page output:\n" . $out );
+        }
     }
     $buildnr = $matches[1];
 
@@ -509,7 +879,7 @@ function run_run_jenkins_build( $task=null, $args=array(), $cliopts=array() )
 
     if ( is_array( $out ) && @$out['result'] == 'SUCCESS' )
     {
-        pake_echo( "Build succesful" );
+        pake_echo( "Build $buildnr succesful" );
     }
     else
     {
@@ -518,6 +888,143 @@ function run_run_jenkins_build( $task=null, $args=array(), $cliopts=array() )
 }
 
 /**
+ * Generates php-api docs of the build (optionally can be run on pubsvn.ez.no)
+ *
+ * Prerequisite task: dist-init
+ * Options:
+ *   --doxygen=<...> path to doxygen executable (inc. executable name)
+ *   --sourcedir=<...> dir with eZ sources, defaults to build/release/ezpublish (from config. file)
+ *   --docsdir=<...> dir where docs will be saved, default to build/apidocs/ezpublish/<tool>/ (from config. file)
+ *
+ * @todo warn user and abort if target directories for doc are not empty
+ * @todo add support for setting path to tools in some config setting
+ * @todo generate .tgs and .bz2 of docs instead of .zip
+ */
+function run_generate_apidocs( $task=null, $args=array(), $cliopts=array() )
+{
+    $opts = eZPCPBuilder::getOpts( $args );
+    $sourcedir = @$cliopts['sourcedir'];
+    if ( $sourcedir == '' )
+    {
+        $sourcedir = $opts['build']['dir'] . '/release/' . eZPCPBuilder::getProjName();
+    }
+    $docsdir = @$cliopts['docsdir'];
+    if ( $docsdir == '' )
+    {
+        $docsdir = $opts['build']['dir'] . '/apidocs/' . eZPCPBuilder::getProjName();
+    }
+
+    if ( $opts['create']['doxygen_doc'] || $opts['create']['docblox_doc'] || $opts['create']['phpdoc_doc'] )
+    {
+        $files = pakeFinder::type( 'file' )->name( 'index.php' )->maxdepth( 0 )->in( $sourcedir );
+        if ( !count( $files ) )
+        {
+            throw new pakeException( "Can not generate documentation: no sources found in $sourcedir" );
+        }
+    }
+
+    if ( $opts['create']['doxygen_doc'] )
+    {
+        /// @todo allow path to doxygen to be gotten from config settings
+        $doxygen = @$cliopts['doxygen'];
+        if ( $doxygen == '' )
+        {
+            $doxygen = 'doxygen';
+        }
+        $doxyfile = $opts['build']['dir'] . '/doxyfile';
+        pake_copy( 'pake/doxyfile_master', $doxyfile, array( 'override' => true ) );
+        file_put_contents( $doxyfile,
+           "\nPROJECT_NAME = " . eZPCPBuilder::getLongProjName() .
+           "\nPROJECT_NUMBER = " . $opts['version']['alias'] .
+           "\nOUTPUT_DIRECTORY = " . $docsdir . '/doxygen' .
+           "\nINPUT = " . $sourcedir .
+           "\nEXCLUDE = " . $sourcedir . '/settings' . // ' ' . $sourcedir . '/lib/ezc' . exclude more ?
+           "\nSTRIP_FROM_PATH = " . $sourcedir, FILE_APPEND );
+        pake_mkdirs( $docsdir . '/doxygen' );
+        $out = pake_sh( escapeshellcmd( $doxygen ) . ' ' . escapeshellarg( $doxyfile ) . ' > ' . escapeshellarg( $docsdir . '/doxygen/generate.log' ) );
+
+        // test that there are any doc files created
+        $files = pakeFinder::type( 'file' )->name( 'index.html' )->maxdepth( 0 )->in( $docsdir . '/doxygen/html' );
+        if ( !count( $files ) )
+        {
+            throw new pakeException( "Doxygen did not generate index.html file in $docsdir/doxygen/html" );
+        }
+        // zip the docs
+        /// @todo create .tgz, .bz2 tarballs
+        $filename = 'ezpublish-' . $opts[eZPCPBuilder::getProjName()]['name'] . '-' . $opts['version']['alias'] . '-apidocs-doxygen.zip';
+        $target = $opts['dist']['dir'] . '/' . $filename;
+        eZPCPBuilder::archiveDir( $docsdir . '/doxygen/html', $target, ezcArchive::ZIP, true );
+    }
+
+    if ( $opts['create']['docblox_doc'] )
+    {
+        $docblox = @$cliopts['docblox'];
+        if ( $docblox == '' )
+        {
+            $docblox = 'docblox.php';
+        }
+        pake_mkdirs( $docsdir . '/docblox/html' );
+        $out = pake_sh( 'php ' . escapeshellarg( $docblox ) .
+            ' -d ' . escapeshellarg( $sourcedir ) . ' -t ' . escapeshellarg( $docsdir . '/docblox/html' ) .
+            ' --title ' . escapeshellarg( eZPCPBuilder::getLongProjName() ) .
+            ' --ignore benchmarks/,extension/,lib/ezc/,settings/,tests/' .
+            ' > ' . escapeshellarg( $docsdir . '/docblox/generate.log' ) );
+        /// @todo sed -e "s,${checkoutpath},,g" ${doxydir}/generate.log > ${doxydir}/generate2.log
+
+        // test that there are any doc files created
+        $files = pakeFinder::type( 'file' )->name( 'index.html' )->maxdepth( 0 )->in( $docsdir . '/docblox/html' );
+        if ( !count( $files ) )
+        {
+            throw new pakeException( "Doxygen did not generate index.html file in $docsdir/docblox/html" );
+        }
+        // zip the docs
+        /// @todo create .tgz, .bz2 tarballs
+        $filename = 'ezpublish-' . $opts[eZPCPBuilder::getProjName()]['name'] . '-' . $opts['version']['alias'] . '-apidocs-docblox.zip';
+        $target = $opts['dist']['dir'] . '/' . $filename;
+        eZPCPBuilder::archiveDir( $docsdir . '/docblox/html', $target, ezcArchive::ZIP, true );
+    }
+
+    if ( $opts['create']['phpdoc_doc'] )
+    {
+        $phpdoc = @$cliopts['phpdoc'];
+        if ( $phpdoc == '' )
+        {
+            $phpdoc = 'phpdoc';
+        }
+        pake_mkdirs( $docsdir . '/phpdoc/html' );
+        // we try to avoid deprecation errors from phpdoc
+        $errcode =  30719; // php 5.3, 5.4
+        if ( version_compare( PHP_VERSION, '5.3.0' ) < 0 )
+        {
+            $errcode =  6143;
+        }
+        // phpdoc uses A LOT of memory as well
+        $out = pake_sh( "php -d error_reporting=$errcode -d memory_limit=2000M ". escapeshellarg( $phpdoc ) .
+            ' -t ' . escapeshellarg( $docsdir . '/phpdoc/html' ) .
+            ' -d ' . escapeshellarg( $sourcedir ) . ' -pp -s -ti ' . escapeshellarg( eZPCPBuilder::getLongProjName() ) .
+            ' -i benchmarks/,extension/,lib/ezc/,settings/,tests/' .
+            ' > ' . escapeshellarg( $docsdir . '/phpdoc/generate.log' ) );
+        /// @todo sed -e "s,${phpdocdir},,g" ${phpdocdir}/generate.log > ${phpdocdir}/generate2.log
+        ///       sed -e "s,${checkoutpath},,g" ${phpdocdir}/generate2.log > ${phpdocdir}/generate3.log
+        ///       sed -e "s,${phpdocinstall},,g" ${phpdocdir}/generate3.log > ${phpdocdir}/generate4.log
+        // test that there are any doc files created
+        $files = pakeFinder::type( 'file' )->name( 'index.html' )->maxdepth( 0 )->in( $docsdir . '/phpdoc/html' );
+        if ( !count( $files ) )
+        {
+            throw new pakeException( "Doxygen did not generate index.html file in $docsdir/phpdoc/html" );
+        }
+        // zip the docs
+        /// @todo create .tgz, .bz2 tarballs
+        $filename = 'ezpublish-' . $opts[eZPCPBuilder::getProjName()]['name'] . '-' . $opts['version']['alias'] . '-apidocs-phpdoc.zip';
+        $target = $opts['dist']['dir'] . '/' . $filename;
+        eZPCPBuilder::archiveDir( $docsdir . '/phpdoc/html', $target, ezcArchive::ZIP, true );
+    }
+}
+
+/**
+ * Creates different versions of the build tarballs (the main tarballs are created
+ * on Jenkins).
+ *
  * We rely on the pake dependency system to do the real stuff
  * (run pake -P to see tasks included in this one)
  */
@@ -525,6 +1032,9 @@ function run_dist( $task=null, $args=array(), $cliopts=array() )
 {
 }
 
+/**
+ * Downloads the build tarballs from Jenkins for further repackaging; options: --build=<buildnr>
+ */
 function run_dist_init( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
@@ -564,7 +1074,7 @@ function run_dist_init( $task=null, $args=array(), $cliopts=array() )
     }
     if ( $fileurl == '' )
     {
-        pake_echo( "No artifacts aviable for build $buildnr" );
+        pake_echo( "No artifacts available for build $buildnr" );
         return;
     }
     // download and unzip the file
@@ -575,18 +1085,22 @@ function run_dist_init( $task=null, $args=array(), $cliopts=array() )
         throw new pakeException( "Missing Zeta Components: cannot unzip downloaded file. Use the environment var PHP_CLASSPATH" );
     }
     // clean up the 'release' dir
-    pake_remove_dir( $opts['dist']['dir'] );
+    /// @todo this method is a bit slow, should find a faster one
+    pake_remove_dir( $opts['build']['dir'] . '/release' );
     // and unzip eZ into it - in a folder with a specific name
     $zip = ezcArchive::open( $filename, ezcArchive::ZIP );
     $rootpath = $opts['build']['dir'] . '/release';
     $zip->extract( $rootpath );
     $currdir = pakeFinder::type( 'directory' )->in( $rootpath );
-    $currdir = $subdir[0];
+    $currdir = $currdir[0];
     $finaldir = $rootpath . '/' . eZPCPBuilder::getProjName();
     pake_rename( $currdir, $finaldir );
     pake_echo( "dir+         " . $finaldir );
 }
 
+/**
+ * Creates the MS WPI
+ */
 function run_dist_wpi( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
@@ -604,24 +1118,26 @@ function run_dist_wpi( $task=null, $args=array(), $cliopts=array() )
             // add extra files to build
             /// @todo move this to another phase/task... ?
 
+            /// @todo shall we check that there's no spurious file in $toppath?
+
             $pakepath = dirname( __FILE__ ) . '/pake';
-            pake_copy( $pakepath . '/wpifiles/install.sql', $toppath . '/install.sql' );
+            pake_copy( $pakepath . '/wpifiles/install.sql', $toppath . '/install.sql', array( 'override' => true ) );
 
             /// @todo: if the $rootpath is different from "ezpublish", the manifest and parameters files need to be altered accordingly
             /// after copying them to their location
-            pake_copy( $pakepath . '/wpifiles/manifest.xml', $toppath . '/manifest.xml' );
-            pake_copy( $pakepath . '/wpifiles/parameters.xml', $toppath . '/parameters.xml' );
+            pake_copy( $pakepath . '/wpifiles/manifest.xml', $toppath . '/manifest.xml', array( 'override' => true ) );
+            pake_copy( $pakepath . '/wpifiles/parameters.xml', $toppath . '/parameters.xml', array( 'override' => true ) );
 
             // this one is overwritten
             pake_copy( $pakepath . '/wpifiles/kickstart.ini', $rootpath . '/kickstart.ini', array( 'override' => true ) );
 
             if ( is_file( $rootpath . '/web.config-RECOMMENDED' ) )
             {
-                pake_copy( $rootpath . '/web.config-RECOMMENDED', $rootpath . '/web.config' );
+                pake_copy( $rootpath . '/web.config-RECOMMENDED', $rootpath . '/web.config', array( 'override' => true ) );
             }
             else if ( !is_file( $rootpath . '/web.config' ) )
             {
-                pake_copy( $pakepath . '/wpifiles/web.config', $rootpath . '/web.config' );
+                pake_copy( $pakepath . '/wpifiles/web.config', $rootpath . '/web.config', array( 'override' => true ) );
             }
 
             // create zip
@@ -649,6 +1165,102 @@ function run_dist_wpi( $task=null, $args=array(), $cliopts=array() )
 }
 
 /**
+ * Uploads dist artifacts to share.ez.no, pubsvn.rz.no; INCOMPLETE!
+ *
+ * We rely on the pake dependency system to do the real stuff
+ * (run pake -P to see tasks included in this one)
+ */
+function run_release( $task=null, $args=array(), $cliopts=array() )
+{
+
+}
+
+/**
+ * Uploads dist material to share.ez.no and creates all pages: changelogs/releasenotes/credits/.... TO BE DONE
+ */
+function run_update_share( $task=null, $args=array(), $cliopts=array() )
+{
+    throw new pakeException( "Task to be implemented" );
+}
+
+/**
+ * Updates the "eZ CP version history" document, currently hosted on pubsvn.ez.no.
+ *
+ * Optional arguments: --public-keyfile=<...> --private-keyfile=<...> --user=<...> --private-keypasswd=<...>
+ *
+ * @todo add support for getting ssl certs options in config settings
+ */
+function run_update_version_history( $task=null, $args=array(), $cliopts=array() )
+{
+    $opts = eZPCPBuilder::getOpts( $args );
+
+    $public_keyfile = @$cliopts['public-keyfile'];
+    $private_keyfile = @$cliopts['private-keyfile'];
+    $private_keypasswd = @$cliopts['private-keypasswd'];
+    $user = @$cliopts['user'];
+
+    // get file
+    $srv = "http://pubsvn.ez.no";
+    $filename = "/ezpublish_version_history/ez_history.csv";
+    $fullfilename = $srv . $filename;
+    $remotefilename = '/mnt/pubsvn.ez.no/www/' . $filename;
+    $file = pake_read_file( $fullfilename );
+    if ( "" == $file )
+    {
+        throw new pakeException( "Couldn't download {$fullfilename} file" );
+    }
+
+    // patch it
+    /// @todo test that what we got looks at least a bit like what we expect
+    $lines = preg_split( "/\r?\n/", $file );
+    $lines[0] .= $opts['version']['alias']  . ',';
+    $lines[1] .= strftime( '%Y/%m/%d' )  . ',' ;
+    $file = implode( "\n", $lines );
+
+    /// @todo: back up the original as well (upload 1st to srv the unpatched version with a different name, then the new version)
+
+    // upload it: we use curl for sftp
+    $randfile = tempnam( sys_get_temp_dir(), 'EZP' );
+    pake_write_file( $randfile, $file, true );
+    $fp = fopen( $randfile, 'rb' );
+
+    $ch = curl_init();
+    curl_setopt( $ch, CURLOPT_URL, str_replace( 'http://', 'sftp://@', $srv ) . $remotefilename );
+    if ( $user != "" ) curl_setopt( $ch, CURLOPT_USERPWD, $user );
+    if ( $public_keyfile != "" ) curl_setopt( $ch, CURLOPT_SSH_PUBLIC_KEYFILE, $public_keyfile );
+    if ( $private_keyfile != "" ) curl_setopt( $ch, CURLOPT_SSH_PRIVATE_KEYFILE, $private_keyfile );
+    if ( $private_keypasswd != "" ) curl_setopt( $ch, CURLOPT_KEYPASSWD, $private_keypasswd );
+    curl_setopt( $ch, CURLOPT_UPLOAD, 1 );
+    curl_setopt( $ch, CURLOPT_INFILE, $fp );
+    // set size of the file, which isn't _mandatory_ but helps libcurl to do
+    // extra error checking on the upload.
+    curl_setopt($ch, CURLOPT_INFILESIZE, filesize( $randfile ) );
+    $ok = curl_exec( $ch );
+    $errinfo = curl_error( $ch );
+    curl_close( $ch );
+
+    fclose( $fp );
+    pake_unlink( $randfile );
+
+    if ( !$ok )
+    {
+        throw new pakeException( "Couldn't write {$fullfilename} file: " . $errinfo );
+    }
+
+    pake_echo_action( "file+", $filename );
+}
+
+/**
+ * Uploads php-api docs of the build to pubsvn.ez.no. TO BE CODED
+ */
+function run_upload_apidocs( $task=null, $args=array(), $cliopts=array() )
+{
+    throw new pakeException( "Task to be implemented" );
+}
+
+/**
+ * Builds the cms and generates the tarballs.
+ *
  * We rely on the pake dependency system to do the real stuff
  * (run pake -P to see tasks included in this one)
  */
@@ -656,12 +1268,18 @@ function run_all( $task=null, $args=array(), $cliopts=array() )
 {
 }
 
+/**
+ * Removes the build/ directory
+ */
 function run_clean( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
     pake_remove_dir( $opts['build']['dir'] );
 }
 
+/**
+ * Removes the dist/ directory (usually includes the apidocs directory)
+ */
 function run_dist_clean( $task=null, $args=array(), $cliopts=array() )
 {
     $opts = eZPCPBuilder::getOpts( $args );
@@ -669,6 +1287,21 @@ function run_dist_clean( $task=null, $args=array(), $cliopts=array() )
 }
 
 /**
+ * Removes the directory where the local copy of the CI repo is kept
+ */
+function run_clean_ci_repo( $task=null, $args=array(), $cliopts=array() )
+{
+    $opts = eZPCPBuilder::getOpts( $args );
+    if ( @$opts['ci-repo']['local-path'] == '' )
+    {
+        throw new pakeException( "Missing option ci-repo:local-path in config file: can not remove CI repo" );
+    }
+    pake_remove_dir( $opts['ci-repo']['local-path'] );
+}
+
+/**
+ * Removes the build/ and dist/ directories (not the one for the CI repo source files).
+ *
  * We rely on the pake dependency system to do the real stuff
  * (run pake -P to see tasks included in this one)
  */
@@ -676,6 +1309,9 @@ function run_clean_all( $task=null, $args=array(), $cliopts=array() )
 {
 }
 
+/**
+ * Checks if a newer version of the tool is available online
+ */
 function run_tool_upgrade_check( $task=null, $args=array(), $cliopts=array() )
 {
     $latest = eZPCPBuilder::latestVersion();
@@ -707,7 +1343,11 @@ function run_tool_upgrade_check( $task=null, $args=array(), $cliopts=array() )
     }
 }
 
-/// @todo add a backup enable/disable option
+/**
+ *  Upgrades to the latest version of the tool available online.
+ *
+ * @todo add a backup enable/disable option
+ */
 function run_tool_upgrade( $task=null, $args=array(), $cliopts=array() )
 {
     $latest = eZPCPBuilder::latestVersion( true );
@@ -732,36 +1372,6 @@ function run_tool_upgrade( $task=null, $args=array(), $cliopts=array() )
     }
 }
 
-function run_help( $task=null, $args=array(), $cliopts=array() )
-{
-    if ( count( $args ) == 0 || $args[0] == 'help' )
-    {
-        echo "To get detailed description of a taks, run: pake help \$task\n";
-        echo "To see list of available tasks, run: pake -T\n";
-        echo "To see list of tasks dependencies, run: pake -P\n";
-        echo "To see more available options, run: pake -H\n";
-    }
-    else
-    {
-        try
-        {
-            $task = pakeTask::get( $args[0] );
-            if ( isset( $GLOBALS['pake_longdesc'][$args[0]] ) && $GLOBALS['pake_longdesc'][$args[0]] != '' )
-            {
-                echo $GLOBALS['pake_longdesc'][$args[0]];
-            }
-            else
-            {
-                echo $task->get_comment();
-            }
-        }
-        catch( exception $e )
-        {
-            echo "The task '{$args[0]}' is not available";
-        }
-
-    }
-}
 /**
 * Class implementing the core logic for our pake tasks
 * @todo separate in another file?
@@ -771,14 +1381,20 @@ class eZPCPBuilder
     static $options = null;
     //static $defaultext = null;
     static $installurl = 'http://svn.projects.ez.no/ezpublishbuilder/stable';
-    static $version = '0.2';
-    static $min_pake_version = '1.6.1';
+    static $version = '0.3';
+    static $min_pake_version = '1.7.1';
     static $projname = 'ezpublish';
 
-    // leftover from ezextensionbuilder
+    // leftover from ezextensionbuilder - currently hardcoded in the class
     static function getProjName()
     {
         return self::$projname;
+    }
+
+    // taken from config file
+    static function getLongProjName( $withPrefix = false )
+    {
+        return ( $withPrefix ? 'eZ Publish ': '' ) . ucfirst( str_replace( '_', ' ',  self::$options[self::$projname][self::$projname]['name'] ) );
     }
 
     /**
@@ -808,7 +1424,8 @@ class eZPCPBuilder
         $default_opts = array(
             'build' => array( 'dir' => 'build' ),
             'dist' => array( 'dir' => 'dist' ),
-            'create' => array( 'mswpipackage' => true, /*'tarball' => false, 'zip' => false, 'filelist_md5' => true, 'doxygen_doc' => false, 'ezpackage' => false, 'pearpackage' => false*/ ),
+            'docs' => array( 'dir' => 'dist/docs' ),
+            'create' => array( 'mswpipackage' => true, /*'tarball' => false, 'zip' => false, 'filelist_md5' => true,*/ 'doxygen_doc' => false, 'docblox_doc' => false, 'phpdoc_doc' => false, /*'ezpackage' => false, 'pearpackage' => false*/ ),
             //'version' => array( 'license' => 'GNU General Public License v2.0' ),
             //'releasenr' => array( 'separator' => '.' ),
             //'files' => array( 'to_parse' => array(), 'to_exclude' => array(), 'gnu_dir' => '', 'sql_files' => array( 'db_schema' => 'schema.sql', 'db_data' => 'cleandata.sql' ) ),
@@ -1059,58 +1676,6 @@ class eZPCPBuilder
 
 }
 
-// The following two functions we use, and submitted for inclusion in pake.
-// While we wait for acceptance, we define them here...
-if ( !function_exists( 'pake_replace_regexp_to_dir' ) )
-{
-
-function pake_replace_regexp_to_dir($arg, $src_dir, $target_dir, $regexps, $limit=-1)
-{
-    $files = pakeFinder::get_files_from_argument($arg, $src_dir, true);
-
-    foreach ($files as $file)
-    {
-        $replaced = false;
-        $content = pake_read_file($src_dir.'/'.$file);
-        foreach ($regexps as $key => $value)
-        {
-            $content = preg_replace($key, $value, $content, $limit, $count);
-            if ($count) $replaced = true;
-        }
-
-        pake_echo_action('regexp', $target_dir.DIRECTORY_SEPARATOR.$file);
-
-        file_put_contents($target_dir.DIRECTORY_SEPARATOR.$file, $content);
-    }
-}
-
-function pake_replace_regexp($arg, $target_dir, $regexps, $limit=-1)
-{
-    pake_replace_regexp_to_dir($arg, $target_dir, $target_dir, $regexps, $limit);
-}
-
-}
-
-if ( !function_exists( 'pake_longdesc' ) )
-{
-    $GLOBALS['pake_longdesc'] = array();
-    /**
-     * Allows the user to define a long description for tasks, besides what is
-     * done via pake_desk.
-     * @param, string $desc If $description is empty, phpdoc for the function is used
-     */
-    function pake_longdesc( $task, $desc='' )
-    {
-        $func = 'run_' . str_replace( '-', '_', $task );
-        if ( $desc == '' && function_exists( $func ) )
-        {
-            $func = new ReflectionFunction( $func );
-            $desc = $func->getDocComment();
-        }
-        $GLOBALS['pake_longdesc'][$task] = $desc;
-    }
-}
-
 
 // *** Live code starts here ***
 
@@ -1185,68 +1750,59 @@ if ( !( isset( $GLOBALS['internal_pake'] ) && $GLOBALS['internal_pake'] ) )
     pake_require_version( eZPCPBuilder::$min_pake_version );
 }
 
-pake_desc( 'Shows help message' );
 pake_task( 'default' );
 
-pake_desc( 'Shows the properties for this build file' );
 pake_task( 'show-properties' );
 
-pake_desc( 'Downloads eZ sources from git' );
 pake_task( 'init' );
 
-pake_desc( 'Downloads the CI repo sources from git (needs to be run only once)' );
 pake_task( 'init-ci-repo' );
 
-pake_desc( 'Builds the cms. Options: --skip-init, --skip-changelog-pause, --skip-before-jenkins-pause' );
-pake_task( 'build', 'init', 'generate-changelog', 'wait-for-changelog', 'generate-html-changelog', 'update-ci-repo', 'wait-for-continue', 'run-jenkins-build' );
+pake_task( 'build', 'init', 'init-ci-repo', 'generate-changelog', 'wait-for-changelog', 'update-ci-repo', 'wait-for-continue', 'run-jenkins-build' );
 
-pake_desc( 'Generates a changelog file from git logs' );
-pake_task( 'generate-changelog' );
+pake_task( 'update-source' );
 
-pake_desc( 'Dummy task. Asks a question to the user and waits for an answer...' );
+pake_task( 'generate-changelog', 'update-source' );
+
 pake_task( 'wait-for-changelog' );
 
-pake_desc( 'Generate changelog files that can be copied and pasted into ezxml rich text' );
-pake_task( 'generate-html-changelog' );
+pake_task( 'update-ci-repo-source' );
 
-pake_desc( 'Commits changelog to the "ci" git repo and updates in there other files holding version-related infos' );
-pake_task( 'update-ci-repo' );
+pake_task( 'update-ci-repo', 'update-ci-repo-source' );
 
-pake_desc( 'Dummy task. Asks a question to the user and waits for an answer...' );
 pake_task( 'wait-for-continue' );
 
-pake_desc( 'Executes the build projects on Jenkins' );
 pake_task( 'run-jenkins-build' );
 
-pake_desc( 'Downloads the build tarballs from Jenkins for further repackaging. Options: --build=<buildnr>' );
+pake_task( 'generate-html-changelog' );
+
+pake_task( 'generate-html-credits' );
+
+pake_task( 'update-version-history' );
+
+pake_task( 'generate-apidocs' );
+
 pake_task( 'dist-init' );
 
-pake_desc( 'Creates the MS WPI' );
 pake_task( 'dist-wpi' );
 
-pake_desc( 'Creates different versions of the build tarballs' );
-pake_task( 'dist', 'dist-init', 'dist-wpi' );
+pake_task( 'dist', 'dist-init', 'dist-wpi', 'generate-apidocs' );
 
-pake_desc( 'Builds the cms and generates the tarballs' );
-pake_task( 'all', 'build', 'dist' );
+pake_task( 'release', 'generate-html-changelog', 'generate-html-credits', 'update-share', 'update-version-history', 'upload-apidocs' );
 
-pake_desc( 'Removes the build/ directory' );
+pake_task( 'all', 'build', 'dist', 'release' );
+
 pake_task( 'clean' );
 
-pake_desc( 'Removes the dist/ directory' );
+pake_task( 'clean-ci-repo' );
+
 pake_task( 'dist-clean' );
 
-pake_desc( 'Removes the build/ and dist/ directories' );
 pake_task( 'clean-all', 'clean', 'dist-clean' );
 
-pake_desc( 'Checks if a newer version of the tool is available online' );
 pake_task( 'tool-upgrade-check' );
 
-pake_desc( 'Upgrades to the latest version of the tool available online' );
 pake_task( 'tool-upgrade' );
-
-pake_desc( 'Returns detailed description of existing tasks. Usage: php pakefile.php help $task' );
-pake_task( 'help' );
 
 }
 
